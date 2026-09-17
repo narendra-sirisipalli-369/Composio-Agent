@@ -9,16 +9,61 @@ The official assignment list is loaded: **100 apps in 10 categories**. All **100
 ## Architecture
 
 ```text
-Official assignment → exact dataset → name resolver
-  → Tavily Search (four targeted queries) → Tavily Extract
-  → LangGraph fan-out: auth | credentials | API | MCP
-  → exact quote check + Gemini entailment verification
-  → PostgreSQL runs, sources, claims, reviews
-  → FastAPI → Next.js chat / apps / insights / verification
-  → exported standalone index.html
+                        data/assignment.md (official 100-app list)
+                                    │
+                          data/build_dataset.py
+                                    │
+                                    ▼
+                             data/apps.json  ──────────────────────┐
+                                    │                               │
+                     app.dataset: resolve() / mentioned_app()       │
+                                    │                               │
+   ┌────────────────────────────────────────────────────────────┐  │
+   │  app.cli  (batch)          app.main  (FastAPI, live chat)   │  │
+   │  run --all --concurrency N       /api/chat, /api/apps, ...  │  │
+   └───────────────────┬───────────────────────┬─────────────────┘  │
+                        │                       │                   │
+                        ▼                       ▼                   │
+              app.service.queue_run / execute_run                   │
+              (dedupe by TTL; auto-fail runs stuck                  │
+               "running" past a 10-min staleness window)            │
+                        │                                           │
+                        ▼                                           │
+   ┌─────────────────────────── app.research: LangGraph ─────────┐  │
+   │                                                              │  │
+   │   discover                                                  │  │
+   │   ├─ Tavily Search  (4 targeted queries, domain-scoped)      │  │
+   │   └─ Tavily Extract (raw doc text, tagged by topic)          │  │
+   │        │                                                     │  │
+   │        ▼  (fan-out, parallel)                                │  │
+   │   ┌────────┬─────────────┬────────┬────────┐                 │  │
+   │   │  auth  │ credentials │  api   │  mcp   │  ← Gemini        │  │
+   │   │        │             │        │        │  structured      │  │
+   │   └────────┴─────────────┴────────┴────────┘  output per      │  │
+   │        │         (draft claims, one Gemini call each,         │  │
+   │        │          rate-limited to the free-tier quota)        │  │
+   │        ▼  (fan-in)                                            │  │
+   │   verify                                                      │  │
+   │   ├─ exact-quote check (claim's excerpt must appear            │  │
+   │   │   verbatim in the extracted source text)                  │  │
+   │   ├─ batched Gemini entailment check (indexed, one call        │  │
+   │   │   per run instead of per-claim)                            │  │
+   │   └─ targeted re-search + retry for any dimension with         │  │
+   │       zero supported claims                                    │  │
+   └──────────────────────────────┬───────────────────────────────┘  │
+                                   ▼                                  │
+                    PostgreSQL: runs, sources, claims, reviews ◄──────┘
+                                   │
+                   ┌───────────────┴────────────────┐
+                   ▼                                 ▼
+        app.main (FastAPI JSON API)         app.cli export
+        Next.js: chat / 100 apps /          → data/research-export.json
+        insights / verification pages       → case-study/index.html
+                                             → frontend/public/case-study.html
+                                             → root index.html (this submission)
 ```
 
-Tavily handles retrieval; Gemini 2.5 Flash reasons over extracted text using Pydantic structured output. The four research dimensions run in parallel. A claim must cite an extracted URL, contain an exact source excerpt, and pass an independent support check before appearing as a fact. Unsupported, contradicted, and uncertain claims remain in the verification ledger. A buildability verdict is derived conservatively from supported access, auth, and API claims.
+Tavily handles retrieval; `gemini-3.5-flash-lite` reasons over extracted text using Pydantic structured output (paced under its free-tier 15 requests/minute cap — see `GEMINI_REQUEST_INTERVAL_SECONDS` in `config.py`). The four research dimensions run in parallel. A claim must cite an extracted URL, contain an exact source excerpt, and pass an independent Gemini entailment check before appearing as a fact. Unsupported, contradicted, and uncertain claims remain in the verification ledger rather than being discarded. A buildability verdict is derived conservatively from supported access, auth, and API claims. On top of the automatic loop, a human audit (`POST /api/reviews`) cross-checks a sample against the live source pages and records a correct/incorrect/uncertain verdict per claim — see `data/research-export.json` and the Verification page for the resulting accuracy numbers.
 
 The official dataset lives in `data/assignment.md`. `data/build_dataset.py` parses it into `data/apps.json`; no alternate app list is used. Hints are discovery seeds, not verified evidence. The full requirements, schema and workflow are in [docs/PLAN.md](docs/PLAN.md).
 
@@ -29,7 +74,7 @@ Implementation references: [Tavily Search and Extract API](https://docs.tavily.c
 - Next.js / React frontend
 - FastAPI and Pydantic backend
 - LangGraph orchestration
-- Gemini 2.5 Flash (`GEMINI_MODEL` is configurable)
+- Gemini (`gemini-3.5-flash-lite` by default; `GEMINI_MODEL` is configurable)
 - Tavily Search and Extract
 - PostgreSQL via SQLAlchemy; local SQLite fallback for basic UI inspection and tests
 
