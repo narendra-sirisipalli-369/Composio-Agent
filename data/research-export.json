@@ -18456,18 +18456,18 @@
     },
     "app_patterns": {
       "auth": {
-        "token": 33,
         "oauth2": 49,
+        "token": 33,
         "api_key": 29,
         "other": 4,
         "jwt": 3,
         "basic": 8
       },
       "credentials": {
-        "free_access": 16,
-        "admin_approval": 22,
         "self_serve": 24,
         "paid_plan": 12,
+        "admin_approval": 22,
+        "free_access": 16,
         "other": 15,
         "partner_gated": 6,
         "trial": 8,
@@ -18488,16 +18488,16 @@
       }
     },
     "coverage_by_category": {
-      "Marketing, Ads, Email and Social": 10,
-      "Data, SEO and Scraping": 10,
-      "Ecommerce": 10,
-      "Finance and Fintech": 10,
-      "Developer, Infra and Data platforms": 10,
       "Communications and Messaging": 10,
+      "CRM and Sales": 10,
       "AI, Research and Media-native": 10,
-      "Productivity and Project Management": 10,
+      "Marketing, Ads, Email and Social": 10,
+      "Ecommerce": 10,
       "Support and Helpdesk": 10,
-      "CRM and Sales": 10
+      "Developer, Infra and Data platforms": 10,
+      "Productivity and Project Management": 10,
+      "Finance and Fintech": 10,
+      "Data, SEO and Scraping": 10
     },
     "note": "Pattern values count distinct apps with at least one supported claim of that tag. Apps can have more than one tag; denominator is completed apps only."
   },
