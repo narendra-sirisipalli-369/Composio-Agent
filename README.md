@@ -8,59 +8,42 @@ The official assignment list is loaded: **100 apps in 10 categories**. All **100
 
 ## Architecture
 
-```text
-                        data/assignment.md (official 100-app list)
-                                    │
-                          data/build_dataset.py
-                                    │
-                                    ▼
-                             data/apps.json  ──────────────────────┐
-                                    │                               │
-                     app.dataset: resolve() / mentioned_app()       │
-                                    │                               │
-   ┌────────────────────────────────────────────────────────────┐  │
-   │  app.cli  (batch)          app.main  (FastAPI, live chat)   │  │
-   │  run --all --concurrency N       /api/chat, /api/apps, ...  │  │
-   └───────────────────┬───────────────────────┬─────────────────┘  │
-                        │                       │                   │
-                        ▼                       ▼                   │
-              app.service.queue_run / execute_run                   │
-              (dedupe by TTL; auto-fail runs stuck                  │
-               "running" past a 10-min staleness window)            │
-                        │                                           │
-                        ▼                                           │
-   ┌─────────────────────────── app.research: LangGraph ─────────┐  │
-   │                                                              │  │
-   │   discover                                                  │  │
-   │   ├─ Tavily Search  (4 targeted queries, domain-scoped)      │  │
-   │   └─ Tavily Extract (raw doc text, tagged by topic)          │  │
-   │        │                                                     │  │
-   │        ▼  (fan-out, parallel)                                │  │
-   │   ┌────────┬─────────────┬────────┬────────┐                 │  │
-   │   │  auth  │ credentials │  api   │  mcp   │  ← Gemini        │  │
-   │   │        │             │        │        │  structured      │  │
-   │   └────────┴─────────────┴────────┴────────┘  output per      │  │
-   │        │         (draft claims, one Gemini call each,         │  │
-   │        │          rate-limited to the free-tier quota)        │  │
-   │        ▼  (fan-in)                                            │  │
-   │   verify                                                      │  │
-   │   ├─ exact-quote check (claim's excerpt must appear            │  │
-   │   │   verbatim in the extracted source text)                  │  │
-   │   ├─ batched Gemini entailment check (indexed, one call        │  │
-   │   │   per run instead of per-claim)                            │  │
-   │   └─ targeted re-search + retry for any dimension with         │  │
-   │       zero supported claims                                    │  │
-   └──────────────────────────────┬───────────────────────────────┘  │
-                                   ▼                                  │
-                    PostgreSQL: runs, sources, claims, reviews ◄──────┘
-                                   │
-                   ┌───────────────┴────────────────┐
-                   ▼                                 ▼
-        app.main (FastAPI JSON API)         app.cli export
-        Next.js: chat / 100 apps /          → data/research-export.json
-        insights / verification pages       → case-study/index.html
-                                             → frontend/public/case-study.html
-                                             → root index.html (this submission)
+```mermaid
+flowchart TD
+    A["data/assignment.md<br/>official 100-app list"] --> B["data/build_dataset.py"]
+    B --> C["data/apps.json"]
+    C --> D["app.dataset<br/>resolve() / mentioned_app()"]
+
+    D --> E["app.cli<br/>run --all --concurrency N"]
+    D --> F["app.main (FastAPI)<br/>/api/chat, /api/apps, ..."]
+
+    E --> G["app.service<br/>queue_run / execute_run"]
+    F --> G
+    G -->|"dedupe by TTL; auto-fail runs<br/>stuck 'running' past a 10-min<br/>staleness window"| H
+
+    subgraph H["app.research — LangGraph"]
+        direction TB
+        I["discover<br/>Tavily Search (4 queries) + Tavily Extract"]
+        I --> J1["auth"]
+        I --> J2["credentials"]
+        I --> J3["api"]
+        I --> J4["mcp"]
+        J1 & J2 & J3 & J4 -->|"Gemini structured output,<br/>rate-limited to free-tier quota"| K["verify"]
+        K --> K1["exact-quote check<br/>(excerpt must appear verbatim<br/>in extracted source text)"]
+        K1 --> K2["batched Gemini entailment check<br/>(one indexed call per run)"]
+        K2 --> K3["targeted re-search + retry for any<br/>dimension with zero supported claims"]
+    end
+
+    H --> L[("PostgreSQL<br/>runs, sources, claims, reviews")]
+    C --> L
+
+    L --> M["app.main<br/>FastAPI JSON API"]
+    M --> N["Next.js<br/>chat / 100 apps / insights / verification"]
+    L --> O["app.cli export"]
+    O --> P["data/research-export.json"]
+    O --> Q["case-study/index.html"]
+    O --> R["frontend/public/case-study.html"]
+    O --> S["root index.html<br/>(this submission)"]
 ```
 
 Tavily handles retrieval; `gemini-3.5-flash-lite` reasons over extracted text using Pydantic structured output (paced under its free-tier 15 requests/minute cap — see `GEMINI_REQUEST_INTERVAL_SECONDS` in `config.py`). The four research dimensions run in parallel. A claim must cite an extracted URL, contain an exact source excerpt, and pass an independent Gemini entailment check before appearing as a fact. Unsupported, contradicted, and uncertain claims remain in the verification ledger rather than being discarded. A buildability verdict is derived conservatively from supported access, auth, and API claims. On top of the automatic loop, a human audit (`POST /api/reviews`) cross-checks a sample against the live source pages and records a correct/incorrect/uncertain verdict per claim — see `data/research-export.json` and the Verification page for the resulting accuracy numbers.
