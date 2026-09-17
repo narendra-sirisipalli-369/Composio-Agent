@@ -1,10 +1,12 @@
 import pytest
 import asyncio
+import re
 from fastapi.testclient import TestClient
 
 from app.dataset import APPS, resolve, mentioned_app
 from app.research import exact_quote_present, assess_buildability
 from app.main import app, question_focus
+from app import main as main_module
 from app import research
 
 def test_dataset_and_resolver():
@@ -27,8 +29,12 @@ def test_quote_and_buildability_guardrails():
     assert assess_buildability(claims)[0] == "Unclear"
     assert question_focus("How do I get credentials?") == "credentials"
     assert question_focus("Does it support MCP?") == "mcp"
+    assert research.relevant_product_url(APPS[0], "https://developer.salesforce.com/docs/commerce/api") is False
+    assert research.official_url("https://developer.salesforce.com/docs/platform/api-rest", "salesforce.com")
+    assert not research.official_url("https://example.com/salesforce", "salesforce.com")
 
-def test_scope_and_context():
+def test_scope_and_context(monkeypatch):
+    monkeypatch.setattr(main_module, "configured", lambda: False)
     with TestClient(app) as client:
         apps = client.get("/api/apps").json()
         assert len(apps) == 100
@@ -46,14 +52,14 @@ def test_scope_and_context():
 def test_graph_fanout_and_verification(monkeypatch):
     async def fake_tavily(endpoint, payload):
         if endpoint == "search":
-            return {"results": [{"url": "https://example.com/docs", "title": "Example docs"}]}
-        return {"results": [{"url": "https://example.com/docs", "raw_content": "Applications use OAuth 2.0 authorization for developer access. " * 5}]}
+            return {"results": [{"url": "https://developer.salesforce.com/docs", "title": "Example docs"}]}
+        return {"results": [{"url": "https://developer.salesforce.com/docs", "raw_content": "Applications use OAuth 2.0 authorization for developer access. " * 5}]}
     async def fake_generate(schema, prompt):
         if schema is research.DraftClaims:
             return research.DraftClaims(claims=[research.DraftClaim(
-                text="Applications use OAuth 2.0 authorization", tag="oauth2",
-                source_url="https://example.com/docs", evidence="Applications use OAuth 2.0 authorization")])
-        return research.Verification(status="supported", reason="The excerpt directly says this")
+                text="Applications use OAuth 2.0 authorization", tag="other",
+                source_url="https://developer.salesforce.com/docs", evidence="Applications use OAuth 2.0 authorization")])
+        return research.VerificationBatch(results=[research.IndexedVerification(index=int(i), status="supported", reason="Direct support") for i in re.findall(r"Index (\d+)", prompt)])
     monkeypatch.setattr(research, "tavily", fake_tavily)
     monkeypatch.setattr(research, "generate", fake_generate)
     result = asyncio.run(research.GRAPH.ainvoke({"app": APPS[0], "sources": [], "claims": [], "verified": [], "errors": []}))
@@ -63,14 +69,14 @@ def test_graph_fanout_and_verification(monkeypatch):
 def test_targeted_retry_for_bad_evidence(monkeypatch):
     async def fake_tavily(endpoint, payload):
         if endpoint == "search":
-            return {"results": [{"url": "https://example.com/new", "title": "New docs"}]}
-        return {"results": [{"url": "https://example.com/new", "raw_content": "The API uses OAuth 2.0 authorization. " * 5}]}
+            return {"results": [{"url": "https://developer.salesforce.com/new", "title": "New docs"}]}
+        return {"results": [{"url": "https://developer.salesforce.com/new", "raw_content": "The API uses OAuth 2.0 authorization. " * 5}]}
     async def fake_generate(schema, prompt):
         if schema is research.DraftClaims:
             return research.DraftClaims(claims=[research.DraftClaim(
                 text="The API uses OAuth 2.0 authorization", tag="oauth2",
-                source_url="https://example.com/new", evidence="The API uses OAuth 2.0 authorization")])
-        return research.Verification(status="supported", reason="Direct support")
+                source_url="https://developer.salesforce.com/new", evidence="The API uses OAuth 2.0 authorization")])
+        return research.VerificationBatch(results=[research.IndexedVerification(index=int(i), status="supported", reason="Direct support") for i in re.findall(r"Index (\d+)", prompt)])
     monkeypatch.setattr(research, "tavily", fake_tavily)
     monkeypatch.setattr(research, "generate", fake_generate)
     state = {"app": APPS[0], "sources": [{"url": "https://example.com/old", "content": "No relevant evidence", "title": "Old"}],

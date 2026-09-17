@@ -32,9 +32,22 @@ def recent(run):
     completed = run.completed_at.replace(tzinfo=timezone.utc) if run.completed_at.tzinfo is None else run.completed_at
     return datetime.now(timezone.utc) - completed < timedelta(hours=RESEARCH_TTL_HOURS)
 
+RUN_TIMEOUT_MINUTES = 10
+
+def abandoned(run):
+    if not run or run.status not in {"queued", "running"}:
+        return False
+    started = run.started_at.replace(tzinfo=timezone.utc) if run.started_at.tzinfo is None else run.started_at
+    return datetime.now(timezone.utc) - started > timedelta(minutes=RUN_TIMEOUT_MINUTES)
+
 def queue_run(app: dict, refresh: bool = False):
     with SessionLocal.begin() as session:
         old = latest_run(session, app["id"])
+        if old and old.status in {"queued", "running"} and abandoned(old):
+            old.status, old.stage = "failed", "Research failed"
+            old.error = "Run abandoned: exceeded timeout without completing (likely interrupted by a server restart)"
+            old.completed_at = now()
+            old = None
         if old and (old.status in {"queued", "running"} or (not refresh and recent(old))):
             return old.id, False
         run = ResearchRun(app_id=app["id"], model=GEMINI_MODEL)

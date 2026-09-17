@@ -4,7 +4,7 @@ A focused research application for the **exact 100 apps in the Composio AI Produ
 
 ## Current evidence state
 
-The official assignment list is loaded: **100 apps in 10 categories**. This workspace did not include Tavily, Gemini, or PostgreSQL credentials. As delivered, the case study therefore reports **0 completed research runs** and does not invent cross-app findings, verification misses, or accuracy improvement. Once the services below are configured, run the batch command and regenerate the HTML. No live deployment or GitHub remote was supplied.
+The official assignment list is loaded: **100 apps in 10 categories**. All **100 apps have completed research runs** against live Tavily and Gemini services. A 22-claim human audit sample (at least one app per category, plus every app that verified as `Blocked`) was cross-checked by hand against the original source pages: **16 correct, 2 incorrect, 4 uncertain**, for **88.9% audited accuracy**. Of 1,233 claims the agent drafted across all 100 apps, the automatic exact-quote + entailment verification loop withheld 44% (387 unsupported, 144 uncertain, 2 contradicted) before they ever reached the dossier — see the Verification page for the full ledger, including the specific misses the human audit caught (e.g. one Stripe claim that inverted a conference anecdote's meaning, one Ramp claim that could not be re-confirmed on re-fetch).
 
 ## Architecture
 
@@ -109,7 +109,7 @@ The backend tests cover the exact dataset, resolver, context switching, scope re
 - An exact quote plus model entailment reduces unsupported claims but is not a substitute for a human sample audit.
 - A completed run can include fewer dimensions if documentation is missing. “No supported finding” does not mean the feature is absent.
 - A research job runs in the FastAPI process. For production load, move jobs to a durable queue; the take-home keeps infrastructure small.
-- No live demo URL or repository link exists in the provided workspace. The local trigger and static HTML are ready for deployment.
+- Gemini's free tier caps request throughput (this project uses `gemini-3.5-flash-lite`, paced under its 15 requests/minute limit); a paid tier would remove this constraint and speed up re-runs.
 
 ## Repository map
 
